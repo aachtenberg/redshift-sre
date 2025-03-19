@@ -1,0 +1,12 @@
+{
+  "DB_NAME": "dev",
+  "DB_USER": "dbadmin",
+  "DB_PASSWORD": "Wh3r3ismy3.14",
+  "DB_HOST": "aa-redshift-test.507525864454.us-east-1.redshift-serverless.amazonaws.com:5439/dev",
+  "DB_PORT": "5439",
+  "WORKGROUP_NAME": "aa-redshift-test",
+  "LOG_GROUP_NAME": "redshift_query_logs",
+  "LOG_STREAM_NAME": "running_queries",
+  "ELAPSED_TIME": 300000,
+  "SCHEDULE_INTERVAL": 5
+}
