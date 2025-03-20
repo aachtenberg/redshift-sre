@@ -10,6 +10,11 @@ SQL_STATEMENT_TEMPLATE = (
     "from sys_query_history where status = 'running' and elapsed_time >  {elapsed_time} and end_time is null order by start_time DESC;"
 )
 
+TRANSACTION_QUERY = (
+    "select *, datediff(s, txn_start, getdate())/86400||' days '||datediff(s, txn_start, getdate())%86400/3600||' hrs '||datediff(s, txn_start, getdate())%3600/60||' mins '||datediff(s, txn_start, getdate())%60||' secs' as duration "
+    "from svv_transactions where lockable_object_type='transactionid' and pid<>pg_backend_pid() order by 3;"
+)
+
 def handler(event, context):
     client = boto3.client('redshift-data')
     logs_client = boto3.client('logs')
@@ -56,6 +61,48 @@ def handler(event, context):
     # Log the records to CloudWatch
     seq_token = None
     for data in records:
+        data = str(data)
+        log_event = {
+            'logGroupName': log_group_name,
+            'logStreamName': log_stream_name,
+            'logEvents': [
+                {
+                    'timestamp': int(round(time.time() * 1000)),
+                    'message': f"{data}"
+                }
+            ],
+        }
+        if seq_token:
+            log_event['sequenceToken'] = seq_token
+        response = logs_client.put_log_events(**log_event)
+        seq_token = response['nextSequenceToken']
+        time.sleep(1)
+    
+    # Execute the transaction query
+    transaction_response = client.execute_statement(
+        WorkgroupName=os.environ['WORKGROUP_NAME'],
+        Database=os.environ['DB_NAME'],
+        Sql=TRANSACTION_QUERY
+    )
+    
+    # Check transaction query status
+    start_time = time.time()
+    transaction_status = client.describe_statement(Id=transaction_response['Id'])['Status']
+    while transaction_status not in ['FINISHED', 'FAILED', 'ABORTED']:
+        time.sleep(1)
+        transaction_status = client.describe_statement(Id=transaction_response['Id'])['Status']
+        # Add a timeout condition
+        if time.time() - start_time > 300:  # 5 minutes timeout
+            raise TimeoutError("Transaction query execution timed out")
+    
+    if transaction_status == 'FINISHED':
+        transaction_result = client.get_statement_result(Id=transaction_response['Id'])
+        transaction_records = transaction_result['Records']
+    else:
+        transaction_records = []
+    
+    # Log the transaction records to CloudWatch
+    for data in transaction_records:
         data = str(data)
         log_event = {
             'logGroupName': log_group_name,
